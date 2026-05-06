@@ -1,59 +1,88 @@
 import streamlit as st
 from groq import Groq
+import pdfplumber
+import os
 
 # ---------------------------
-# PAGE CONFIG
+# API KEY
 # ---------------------------
-st.set_page_config(page_title="AI Chatbot", page_icon="🤖")
+api_key = st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY")
 
-st.title("🤖 Groq AI Chatbot")
-
-# ---------------------------
-# LOAD API KEY (FROM STREAMLIT SECRETS)
-# ---------------------------
-try:
-    client = Groq(api_key=st.secrets["GROQ_API_KEY"])
-except Exception:
-    st.error("❌ GROQ_API_KEY not found. Please add it in Streamlit Secrets.")
+if not api_key:
+    st.error("❌ GROQ_API_KEY not found")
     st.stop()
 
-# ---------------------------
-# CHAT MEMORY
-# ---------------------------
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
-
-# Show chat history
-for role, msg in st.session_state.chat_history:
-    with st.chat_message(role):
-        st.write(msg)
+client = Groq(api_key=api_key)
 
 # ---------------------------
-# USER INPUT
+# PDF TEXT EXTRACTION
 # ---------------------------
-user_input = st.chat_input("Type your message...")
+def extract_text_from_pdf(file):
+    text = ""
+    with pdfplumber.open(file) as pdf:
+        for page in pdf.pages:
+            text += page.extract_text() or ""
+    return text
 
 # ---------------------------
-# CHAT LOGIC
+# UI
 # ---------------------------
-if user_input:
-    # show user message
-    st.chat_message("user").write(user_input)
-    st.session_state.chat_history.append(("user", user_input))
+st.set_page_config(page_title="AI Resume Analyzer", page_icon="📄")
+st.title("📄 AI Resume Analyzer")
+
+st.write("Upload your resume and compare it with a job description.")
+
+# Upload resume
+uploaded_file = st.file_uploader("Upload Resume (PDF)", type=["pdf"])
+
+# Job description input
+job_desc = st.text_area("Paste Job Description", height=200)
+
+# ---------------------------
+# ANALYZE BUTTON
+# ---------------------------
+if st.button("Analyze Resume"):
+
+    if not uploaded_file or not job_desc:
+        st.warning("Please upload resume and enter job description")
+        st.stop()
+
+    resume_text = extract_text_from_pdf(uploaded_file)
+
+    prompt = f"""
+You are an expert ATS resume analyzer.
+
+Compare the resume with job description and provide:
+
+1. Skill Match Score (0-100%)
+2. Missing Skills
+3. Strengths
+4. Weaknesses
+5. Resume Improvement Suggestions
+6. Improved Resume Bullet Points
+
+Resume:
+{resume_text}
+
+Job Description:
+{job_desc}
+"""
 
     try:
         response = client.chat.completions.create(
-            model="llama3-8b-8192",
+            model="llama-3.1-8b-instant",
             messages=[
-                {"role": "user", "content": user_input}
+                {"role": "user", "content": prompt}
             ]
         )
 
-        bot_reply = response.choices[0].message.content
+        result = response.choices[0].message.content
+
+        st.subheader("📊 Analysis Result")
+        st.write(result)
 
     except Exception as e:
-        bot_reply = f"⚠️ Error: {str(e)}"
+        st.error(f"Error: {e}")
 
-    # show bot reply
-    st.chat_message("assistant").write(bot_reply)
-    st.session_state.chat_history.append(("assistant", bot_reply))
+        #git rm --cached .streamlit/secrets.toml
+        #git reset --soft HEAD~1
